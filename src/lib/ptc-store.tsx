@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, ReactNode } from "react";
 import { Task, Period, PtcSettings, DEFAULT_SETTINGS } from "./ptc-types";
+import { celebrate } from "./celebrate";
 
 const TASKS_KEY = "ptc.tasks.v1";
 const SETTINGS_KEY = "ptc.settings.v1";
@@ -97,7 +98,12 @@ export const PtcProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const toggleTask = useCallback((id: string) => {
-    setTasks((prev) => prev.map((t) => t.id === id ? { ...t, completed: !t.completed, completedAt: !t.completed ? new Date().toISOString() : null } : t));
+    setTasks((prev) => prev.map((t) => {
+      if (t.id !== id) return t;
+      const nowCompleted = !t.completed;
+      if (nowCompleted) celebrate();
+      return { ...t, completed: nowCompleted, completedAt: nowCompleted ? new Date().toISOString() : null };
+    }));
   }, []);
 
   const deleteTask = useCallback((id: string) => setTasks((p) => p.filter((t) => t.id !== id)), []);
