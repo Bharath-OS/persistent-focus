@@ -195,16 +195,9 @@ const StatCard = ({ title, value, hint, Icon, accent }: { title: string; value: 
 
 const PeriodView = ({ period }: { period: Period }) => {
   const ptc = usePtc();
-  const [title, setTitle] = useState("");
+  const [dialogOpen, setDialogOpen] = useState(false);
   const tasks = ptc.tasks.filter((t) => t.period === period);
   const { total, completed } = ptc.countByPeriod(period);
-
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title.trim()) return;
-    ptc.addTask({ title: title.trim(), period });
-    setTitle("");
-  };
 
   return (
     <div className="p-6 space-y-5 max-w-3xl">
@@ -213,16 +206,16 @@ const PeriodView = ({ period }: { period: Period }) => {
           <h1 className="text-2xl font-semibold">{PERIOD_LABEL[period]} Tasks</h1>
           <p className="text-sm text-muted-foreground mt-1">{completed} of {total} completed</p>
         </div>
+        <Button onClick={() => setDialogOpen(true)}>
+          <Plus className="w-4 h-4 mr-1.5" /> Add task
+        </Button>
       </header>
 
-      <form onSubmit={submit} className="flex gap-2">
-        <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={`Add a ${PERIOD_LABEL[period].toLowerCase()} task…`} />
-        <Button type="submit">Add task</Button>
-      </form>
-
       <div className="bg-card border border-border rounded-xl p-3 shadow-card">
-        <TaskList tasks={tasks} onToggle={ptc.toggleTask} onDelete={ptc.deleteTask} emptyHint={`No ${PERIOD_LABEL[period].toLowerCase()} tasks yet. Add your first above.`} />
+        <TaskList tasks={tasks} onToggle={ptc.toggleTask} onDelete={ptc.deleteTask} emptyHint={`No ${PERIOD_LABEL[period].toLowerCase()} tasks yet. Click "Add task" to create one.`} />
       </div>
+
+      <AddTaskDialog open={dialogOpen} onOpenChange={setDialogOpen} defaultPeriod={period} lockPeriod />
     </div>
   );
 };
