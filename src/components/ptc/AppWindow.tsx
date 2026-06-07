@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import { ReactNode } from "react";
 import { Minus, Square, X, LayoutDashboard, CalendarDays, CalendarRange, Target, Globe, Settings as SettingsIcon, Flame, TrendingUp, CheckCircle2, Plus } from "lucide-react";
+
 import { AddTaskDialog } from "./AddTaskDialog";
 import { usePtc, PERIOD_LABEL } from "@/lib/ptc-store";
 import { Period } from "@/lib/ptc-types";
