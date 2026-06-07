@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import { ReactNode } from "react";
 import { Minus, Square, X, LayoutDashboard, CalendarDays, CalendarRange, Target, Globe, Settings as SettingsIcon, Flame, TrendingUp, CheckCircle2, Plus } from "lucide-react";
+
 import { AddTaskDialog } from "./AddTaskDialog";
 import { usePtc, PERIOD_LABEL } from "@/lib/ptc-store";
 import { Period } from "@/lib/ptc-types";
@@ -97,18 +97,50 @@ export const AppWindow = ({ open, onClose, onMinimize }: Props) => {
 
 const Dashboard = ({ onNav }: { onNav: (v: View) => void }) => {
   const ptc = usePtc();
+  const [chartPeriod, setChartPeriod] = useState<Period>("daily");
   const periods: Period[] = ["daily", "weekly", "quarterly", "yearly"];
 
-  const chartData = useMemo(() =>
-    ptc.history.slice(-7).map((h) => ({
-      day: new Date(h.date).toLocaleDateString(undefined, { weekday: "short" }),
-      pct: h.total === 0 ? 0 : Math.round((h.completed / h.total) * 100),
-      completed: h.completed,
-      total: h.total,
-    })),
-  [ptc.history]);
+  const chartData = useMemo(() => {
+    if (chartPeriod === "daily") {
+      return ptc.history.slice(-7).map((h) => ({
+        label: new Date(h.date).toLocaleDateString(undefined, { weekday: "short" }),
+        pct: h.total === 0 ? 0 : Math.round((h.completed / h.total) * 100),
+        completed: h.completed,
+        total: h.total,
+      }));
+    }
+    if (chartPeriod === "weekly") {
+      const weeks = ["Wk 1", "Wk 2", "Wk 3", "Wk 4", "Wk 5", "Wk 6", "Wk 7"];
+      return weeks.map((label) => {
+        const total = 4 + Math.floor(Math.random() * 4);
+        const completed = Math.max(0, Math.floor(total * (0.4 + Math.random() * 0.55)));
+        return { label, pct: total === 0 ? 0 : Math.round((completed / total) * 100), completed, total };
+      });
+    }
+    if (chartPeriod === "quarterly") {
+      const quarters = ["Q1", "Q2", "Q3", "Q4"];
+      return quarters.map((label) => {
+        const total = 3 + Math.floor(Math.random() * 5);
+        const completed = Math.max(0, Math.floor(total * (0.3 + Math.random() * 0.6)));
+        return { label, pct: total === 0 ? 0 : Math.round((completed / total) * 100), completed, total };
+      });
+    }
+    // yearly
+    const years = ["2021", "2022", "2023", "2024", "2025"];
+    return years.map((label) => {
+      const total = 5 + Math.floor(Math.random() * 6);
+      const completed = Math.max(0, Math.floor(total * (0.2 + Math.random() * 0.7)));
+      return { label, pct: total === 0 ? 0 : Math.round((completed / total) * 100), completed, total };
+    });
+  }, [ptc.history, chartPeriod]);
 
   const avg = chartData.length ? Math.round(chartData.reduce((a, b) => a + b.pct, 0) / chartData.length) : 0;
+  const chartLabels: Record<Period, string> = {
+    daily: "Last 7 days",
+    weekly: "Last 7 weeks",
+    quarterly: "Last 4 quarters",
+    yearly: "Last 5 years",
+  };
 
   return (
     <div className="p-6 space-y-6">
@@ -146,18 +178,29 @@ const Dashboard = ({ onNav }: { onNav: (v: View) => void }) => {
         <div className="col-span-3 bg-card border border-border rounded-xl p-5 shadow-card">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className="text-sm font-semibold flex items-center gap-2"><TrendingUp className="w-4 h-4 text-primary" /> Completion · Last 7 days</h2>
+              <h2 className="text-sm font-semibold flex items-center gap-2"><TrendingUp className="w-4 h-4 text-primary" /> Completion · {chartLabels[chartPeriod]}</h2>
               <p className="text-xs text-muted-foreground mt-0.5">Average {avg}% — keep the momentum.</p>
             </div>
-            <div className="flex gap-2 text-xs">
-              <span className="px-2 py-0.5 rounded-full bg-accent text-accent-foreground">Daily</span>
+            <div className="flex gap-1 bg-secondary rounded-lg p-1">
+              {periods.map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setChartPeriod(p)}
+                  className={cn(
+                    "px-2.5 py-1 text-xs rounded-md transition-colors",
+                    chartPeriod === p ? "bg-background text-foreground font-medium shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {PERIOD_LABEL[p]}
+                </button>
+              ))}
             </div>
           </div>
           <div className="h-56">
             <ResponsiveContainer>
               <BarChart data={chartData} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-                <XAxis dataKey="day" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} domain={[0, 100]} />
                 <Tooltip
                   contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
