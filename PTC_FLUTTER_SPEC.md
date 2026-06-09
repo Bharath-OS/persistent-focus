@@ -185,65 +185,161 @@ The pill overlay uses a frosted look:
 
 ### 5.1 PILL OVERLAY (always-on-top)
 
-#### Window properties (window_manager)
-- Frameless, transparent background, no taskbar entry.
-- Always-on-top: `true` (toggleable from main window).
-- Resizable: false. Movable: yes (drag).
-- Initial size: **collapsed 132 × 32**, **expanded 340 × 560** (max).
-- Initial position: snapped 16 px from the chosen corner of the primary monitor's work area.
-- Click-through: **off** (overlay must catch hover/click).
+The pill is the **secondary surface** of the app. It is the user's persistent companion when the main window is not on screen — minimized, hidden, or closed-to-tray. It is intentionally tiny, glanceable, and slightly transparent so it never gets in the way, but it can blossom into a fully usable task panel in two deliberate steps.
 
-#### Collapsed state (pill)
-- Fully rounded capsule, height 32 px, padding `14 × 6 px`.
-- Glass background, `shadow-overlay`.
-- Contents, left → right:
-  1. **Status dot**, 6 px circle.
-     - `success` (green) when no overdue.
-     - `warning` (amber) when overdue task exists.
-  2. **Label text** (13 px / w500):
-     - `"3 todos"` when daily incomplete > 0 (singular `1 todo`).
+#### 5.1.1 Visibility rules (when the pill appears)
+
+The pill is **not** always rendered on screen. Its presence follows the main window state:
+
+| Main window state | Pill visible? |
+| --- | --- |
+| Open and focused | **No** — pill is hidden. The user is already working in the full UI. |
+| Open but unfocused (another app on top) | **No** — pill stays hidden; the main window itself is what the user sees when they alt-tab back. |
+| Minimized (to taskbar) | **Yes** — pill fades in at the configured corner. |
+| Closed via the window's `X` button (close-to-tray) | **Yes** — pill fades in; this is the canonical "background mode". |
+| Quit via tray → Quit | No — app exits entirely. |
+
+Transitions: when the pill appears, fade + 4 px slide-in from the corner over 180 ms. When the main window is restored/opened, fade the pill out over 140 ms and stop catching pointer events immediately so the user can click freely on the desktop.
+
+Implementation note (Flutter / `window_manager`): listen to the main window's `onWindowMinimize`, `onWindowRestore`, `onWindowClose` (intercepted), `onWindowFocus`, and `onWindowBlur` events. Mirror that state into a `Riverpod` provider that the overlay window subscribes to via IPC (`desktop_multi_window` channel) to call `windowManager.show()` / `windowManager.hide()` on the overlay window.
+
+#### 5.1.2 Window properties (overlay OS window)
+- Frameless, transparent background, no taskbar entry, no shadow from the OS (we draw our own).
+- Always-on-top: `true` while shown.
+- Resizable: false. Movable: yes (drag anywhere on the body).
+- Click-through: **off** — the pill must catch hover, click, and drag.
+- Three distinct content sizes (the OS window animates between them):
+  - **Collapsed (resting):** 132 × 32 px
+  - **Peek (hover-revealed with close button):** ~168 × 32 px (collapsed width + ~36 px for the close affordance)
+  - **Expanded (full panel):** 340 × 560 px (max; capped at 80 % of screen height)
+- Initial position: 16 px inset from the corner stored in `settings.overlayCorner` (default top-right) on the primary monitor's work area.
+
+#### 5.1.3 Three interaction states
+
+The pill has **three** progressive states, not two. The user must dwell or click to advance — this is intentional so the pill never expands accidentally as the cursor crosses the corner.
+
+```
+   [ • 3 todos  🔥4 ]              ← Collapsed (resting)
+              │ hover ≥ hoverDelay (default 1200 ms)
+              ▼
+   [ • 3 todos  🔥4 ] [ × ]         ← Peek: same pill, now interactive,
+                                      with a close button revealed to the right
+              │ click on the body of the pill
+              ▼
+   ┌─────────────────────────┐
+   │ ● PTC · Always on top  ⌄│
+   │ ─────────────────────── │
+   │ Daily | Weekly | Q | Y  │
+   │ ☐ Finish proposal       │
+   │ ☑ Review emails         │     ← Expanded (full panel)
+   │ ☐ Deep work block       │
+   │ ─────────────────────── │
+   │ [Add a daily task…] [+] │
+   │ ▓▓▓▓░░░░  1/4   🔥4    │
+   └─────────────────────────┘
+```
+
+##### State A — Collapsed (resting)
+
+- Fully rounded capsule, height **32 px**, padding `14 × 6 px`, width hugs content (~132 px typical).
+- Glass background (see §4.5), `shadow-overlay`.
+- Opacity = `settings.collapsedOpacity` (default **0.60**). The translucency is the cue that it is "passive".
+- Cursor: **default** (not a pointer) — the pill is *not* clickable in this state.
+- Contents left → right:
+  1. **Status dot** (6 px). `success` green when no overdue tasks; `warning` amber when any daily task is overdue.
+  2. **Label** (13 px / w500):
+     - `"3 todos"` when daily-incomplete > 0 (singular `"1 todo"`).
      - `"All done 🎉"` when zero incomplete daily tasks.
-  3. **Streak chip** (only if `settings.showStreak && streak > 0`):
-     - Flame icon (warning color) + number, 11 px.
-- Opacity follows `settings.collapsedOpacity` (default 60%).
-- **Hover behavior**:
-  - On mouse enter, start a timer of `settings.hoverDelay` ms (default 1200).
-  - When timer fires, the pill becomes "interactive" — scale to 1.02, opacity 0.95, cursor `click`.
-  - Clicking an interactive pill **expands** it.
-  - On mouse leave (before timer fires), cancel.
-- This delay prevents accidental expansion when the cursor crosses the corner.
+  3. **Streak chip** (only if `settings.showStreak && streak > 0`): flame icon + number, 11 px, `warning` color.
+- Hovering it starts the dwell timer (see next state). Moving the cursor away cancels.
 
-#### Expanded state (panel)
-- 340 px wide, max height `min(560, 80% screen height)`.
-- Glass-strong background, `shadow-overlay`, 16 px radius.
-- **Header strip** (32 px):
-  - Left: green status dot + small caption `"PTC · Always on top"`.
-  - Right: chevron-down button → collapses panel.
-- **Tabs** (4 equal columns in a `secondary`-tinted bar, 8 px margin top, 12 px side margin):
-  - `Daily | Weekly | Quarterly | Yearly`
-  - Each tab shows remaining count in parens at 10 px, e.g. `Daily (3)`.
-  - Active tab has white background + slight shadow.
-- **Task list** (scrollable, flexes to fill):
-  - Dense mode (smaller row height than main window): 28 px rows.
-  - Each row: round checkbox (20 px) + title (14 px) + (optional) due time (12 px, tabular) + delete button shown on hover.
-  - Completed tasks fall to the bottom and render as strike-through `muted-foreground`.
-  - Empty state: centered 12-px-radius accent circle with check icon and grey hint text `"No daily tasks. Add one below!"`.
-- **Inline add form** (bottom, above footer):
-  - 32 px input + square `+` button.
-  - Placeholder: `"Add a daily task…"` (changes per tab).
-  - Enter submits, adds to currently selected period.
-- **Footer strip**:
-  - Thin 6-px progress bar (filled = `completed/total` of active tab).
-  - `1/4` tabular count.
-  - If streak enabled and > 0: flame + number in `warning`.
-- **Dismissal**: `Esc` collapses; clicking outside the panel collapses; clicking the chevron collapses.
+##### State B — Peek (hover-revealed close affordance)
 
-#### Drag/move
-The pill (collapsed or expanded) can be dragged anywhere; on release it snaps to the nearest corner and persists `overlayCorner` to settings. While dragging, opacity bumps to 0.95.
+This is the new intermediate state. Its only purpose is to (a) confirm to the user that the pill is now ready to be interacted with, and (b) surface the close-the-overlay action without forcing a full expansion.
 
-#### Keyboard
-- `Win + T` (global) — toggle expanded/collapsed.
-- `Esc` — collapse when expanded.
+- Trigger: cursor enters the collapsed pill AND remains over it for `settings.hoverDelay` ms (default **1200**).
+- Animation: the OS window grows horizontally only, from collapsed width to peek width (~168 px), over **180 ms** with cubic `(0.4, 0, 0.2, 1)`. Height stays at 32 px — the pill is still a pill, just slightly longer.
+- Visual changes vs collapsed:
+  - Opacity ramps to **0.95**.
+  - Subtle scale `1.00 → 1.02` on the entire pill.
+  - Cursor becomes a **pointer** over the label/body area.
+  - A **close button** (`×`, 20 px target, 14 px icon, `muted-foreground` → `destructive` on hover) appears at the right edge with a 140 ms fade + 4 px slide-in. There is a 1 px hairline divider (`border` color, 50 % opacity) between the body and the close button so the two hit areas are visually distinct.
+- Hit zones in peek state:
+  - **Pill body** (everything left of the divider) → on click, advance to **Expanded** state.
+  - **Close button** (`×`) → on click, **hide the overlay** and **restore the main window** (`windowManager.restore()` + `windowManager.focus()` on the main window; overlay window calls `windowManager.hide()` on itself). This is the only way to dismiss the overlay back to the main app from the pill.
+- Exit from peek state:
+  - Cursor leaves the entire pill area → reverse the animation (collapse width back to 132 px, fade close button out, opacity back to `collapsedOpacity`, cursor back to default) over 160 ms. A 200 ms grace period prevents flicker when the cursor briefly grazes the divider.
+  - Clicking the body → advance to Expanded (see below).
+  - Clicking `×` → overlay hides, main window restores.
+
+##### State C — Expanded (full panel)
+
+- Trigger: click anywhere on the pill body while in Peek state. (Also reachable via the `Win + T` global hotkey from any state.)
+- Animation: the OS window resizes from peek (~168 × 32) to expanded (340 × 560) over **220 ms** cubic `(0.4, 0, 0.2, 1)`, anchored to the corner the pill is docked at, with the panel content fading + scaling from 0.96 → 1.0. The original pill row morphs into the expanded panel's **header strip** — the status dot stays in place; the label is replaced by `"PTC · Always on top"`; the close `×` is replaced by a chevron-down (`⌄`).
+- Background: glass-strong (§4.5), `shadow-overlay`, **16 px** corner radius. Opacity = `settings.expandedOpacity` (default 0.95).
+- Sections (top → bottom):
+  1. **Header strip** (32 px):
+     - Left: green status dot + caption `"PTC · Always on top"` (12 px, `muted-foreground`).
+     - Right: chevron-down button → **collapses back to State A (resting)**, skipping Peek. (We do *not* go back to Peek because the cursor is by definition over the panel here, which would immediately re-trigger Peek and feel jittery.)
+  2. **Period tabs** (4 equal columns in a `secondary`-tinted rounded bar, 8 px top margin, 12 px side margin):
+     - `Daily | Weekly | Quarterly | Yearly`.
+     - Each tab shows the remaining count in parens at 10 px, e.g. `Daily (3)`.
+     - Active tab: white background + small shadow.
+  3. **Task list** (scrollable, flexes to fill):
+     - Dense rows (28 px), smaller than the main window's 36 px rows.
+     - Row: round checkbox (20 px) + title (14 px) + optional due time (12 px tabular, `muted-foreground`) + delete (`×`, shown only on row hover).
+     - Completed tasks: strike-through, `muted-foreground`, sorted to the bottom.
+     - Empty state: centered 48 px accent circle with check icon + hint `"No {period} tasks. Add one below!"`.
+  4. **Inline add form** (above footer):
+     - 32 px text input + square `+` button.
+     - Placeholder per tab: `"Add a daily task…"`, etc.
+     - `Enter` submits and clears.
+  5. **Footer strip**:
+     - 6 px progress bar = `completed / total` of active tab.
+     - `1/4` tabular count.
+     - If `showStreak && streak > 0`: flame + number in `warning`.
+- Dismissal back to **State A (Collapsed)**:
+  - Press `Esc`.
+  - Click the chevron-down in the header.
+  - Click outside the panel (the overlay window's hit-test extends a few px outside the body to detect "outside" clicks; on outside click, collapse).
+- **There is no `×` close button in the expanded panel.** Closing the overlay (and restoring the main window) is exclusively a Peek-state action — this keeps the expanded panel focused on task work.
+
+#### 5.1.4 Drag / move
+
+The pill can be dragged in any of its three states. Hold left mouse on the body (not on the `×` or chevron) and drag. On release, the OS window snaps to the nearest of the four corners and the chosen corner is persisted to `settings.overlayCorner`. While dragging, opacity bumps to 0.95 and the dwell timer is suspended.
+
+#### 5.1.5 Keyboard
+
+- `Win + T` (global hotkey, `hotkey_manager`) — toggle directly between **Collapsed** and **Expanded**, skipping Peek. If the overlay is currently hidden because the main window is open, this hotkey first hides the main window to tray, then shows the overlay in Expanded state.
+- `Esc` — collapse Expanded → Collapsed. No effect in Peek (cursor-driven).
+
+#### 5.1.6 State machine summary
+
+```
+                ┌──────────────────────────────────────────┐
+                │                                          │
+   [hidden] ──main minimized/closed──▶ Collapsed           │
+       ▲                                  │                │
+       │                       hover ≥ hoverDelay          │
+       │                                  ▼                │
+   main restored ◀── click × ──        Peek                │
+       ▲                                  │                │
+       │                          click body / Win+T       │
+       │                                  ▼                │
+       └────── main window opens ──── Expanded ────Esc/⌄/outside─┘
+```
+
+#### 5.1.7 Acceptance criteria specific to the pill
+
+1. Pill is hidden whenever the main window is visible; appears within 200 ms of the main window minimizing or closing-to-tray.
+2. Resting pill never advances to Peek without a continuous hover of at least `hoverDelay` ms.
+3. From Peek, clicking `×` hides the overlay and brings the main window back to the foreground in a single action.
+4. From Peek, clicking the body expands to the full panel without the `×` causing a stray hit.
+5. Expanded panel does **not** contain an `×` close button; only chevron / `Esc` / outside-click collapse it.
+6. Width transitions (Collapsed ↔ Peek) animate horizontally only — height stays 32 px.
+7. Dragging works in all three states and persists corner on release.
+
+
 
 ### 5.2 MAIN WINDOW
 
